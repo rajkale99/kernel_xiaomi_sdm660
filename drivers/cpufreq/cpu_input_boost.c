@@ -44,10 +44,12 @@ module_param(frame_boost_timeout, uint, 0644);
 static __read_mostly int input_stune_boost = CONFIG_INPUT_STUNE_BOOST;
 static __read_mostly int max_stune_boost = CONFIG_MAX_STUNE_BOOST;
 static __read_mostly int general_stune_boost = CONFIG_GENERAL_STUNE_BOOST;
+static __read_mostly int suspend_stune_boost = CONFIG_SUSPEND_STUNE_BOOST;
 
 module_param_named(dynamic_stune_boost, input_stune_boost, int, 0644);
 module_param(max_stune_boost, int, 0644);
 module_param(general_stune_boost, int, 0644);
+module_param(suspend_stune_boost, int, 0644);
 #endif
 
 /* Available bits for boost_drv state */
@@ -78,6 +80,7 @@ struct boost_drv {
 	int max_stune_slot;
 	bool general_stune_active;
 	int general_stune_slot;
+	int root_stune_default;
 };
 
 static struct boost_drv *boost_drv_g;
@@ -380,7 +383,10 @@ static int fb_notifier_cb(struct notifier_block *nb,
 	if (*blank == FB_BLANK_UNBLANK) {
 		set_boost_bit(b, SCREEN_AWAKE);
 		__cpu_input_boost_kick_max(b, CONFIG_WAKE_BOOST_DURATION_MS);
+		set_stune_boost("/", b->root_stune_default, NULL);
 	} else {
+		set_stune_boost("/", suspend_stune_boost,
+				&b->root_stune_default);
 		clear_boost_bit(b, SCREEN_AWAKE);
 		unboost_all_cpus(b);
 	}
@@ -500,6 +506,7 @@ static int __init cpu_input_boost_init(void)
 	INIT_WORK(&b->general_boost, general_boost_worker);
 	INIT_DELAYED_WORK(&b->general_unboost, general_unboost_worker);
 	atomic_set(&b->state, 0);
+	b->root_stune_default = 0;
 
 	b->cpu_notif.notifier_call = cpu_notifier_cb;
 	b->cpu_notif.priority = INT_MAX - 2;
