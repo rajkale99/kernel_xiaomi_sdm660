@@ -18,8 +18,8 @@
 #include <linux/slab.h>
 #include <linux/init.h>
 
-/* Default tunable values */
-#define	DEFAULT_MAX_WRITES_STARVED (2)	/* Max times reads can starve a write */
+/* Max times reads can starve a write */
+#define	DEFAULT_MAX_WRITES_STARVED	(2)
 
 struct anxiety_data {
 	struct list_head queue[2];
@@ -71,29 +71,10 @@ static int anxiety_dispatch(struct request_queue *q, int force)
 
 static void anxiety_add_request(struct request_queue *q, struct request *rq)
 {
-	const uint8_t dir = rq_data_dir(rq);
+	const uint8_t dir = rq_is_sync(rq);
+	struct anxiety_data *adata = q->elevator->elevator_data;
 
-	list_add_tail(&rq->queuelist, &((struct anxiety_data *) q->elevator->elevator_data)->queue[dir]);
-}
-
-static struct request *anxiety_former_request(struct request_queue *q, struct request *rq)
-{
-	const uint8_t dir = rq_data_dir(rq);
-
-	if (rq->queuelist.prev == &((struct anxiety_data *) q->elevator->elevator_data)->queue[dir])
-		return NULL;
-
-	return list_prev_entry(rq, queuelist);
-}
-
-static struct request *anxiety_latter_request(struct request_queue *q, struct request *rq)
-{
-	const uint8_t dir = rq_data_dir(rq);
-
-	if (rq->queuelist.next == &((struct anxiety_data *) q->elevator->elevator_data)->queue[dir])
-		return NULL;
-
-	return list_next_entry(rq, queuelist);
+	list_add_tail(&rq->queuelist, &adata->queue[dir]);
 }
 
 static int anxiety_init_queue(struct request_queue *q, struct elevator_type *elv)
@@ -158,8 +139,8 @@ static struct elevator_type elevator_anxiety = {
 		.elevator_merge_req_fn	= anxiety_merged_requests,
 		.elevator_dispatch_fn	= anxiety_dispatch,
 		.elevator_add_req_fn	= anxiety_add_request,
-		.elevator_former_req_fn	= anxiety_former_request,
-		.elevator_latter_req_fn	= anxiety_latter_request,
+		.elevator_former_req_fn	= elv_rb_former_request,
+		.elevator_latter_req_fn	= elv_rb_latter_request,
 		.elevator_init_fn	= anxiety_init_queue,
 	},
 	.elevator_name = "anxiety",
