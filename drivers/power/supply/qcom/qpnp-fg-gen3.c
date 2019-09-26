@@ -22,6 +22,7 @@
 #include <linux/qpnp/qpnp-revid.h>
 #include "fg-core.h"
 #include "fg-reg.h"
+#include <linux/qpnp/qpnp-adc.h>
 
 #define FG_GEN3_DEV_NAME	"qcom,fg-gen3"
 
@@ -638,24 +639,32 @@ static int fg_get_jeita_threshold(struct fg_chip *chip,
 #define BATT_TEMP_DENR		1
 static int fg_get_battery_temp(struct fg_chip *chip, int *val)
 {
-	int rc = 0, temp;
-	u8 buf[2];
+	int rc = 0;
+	int64_t temp;
+	struct qpnp_vadc_result result;
 
-	rc = fg_read(chip, BATT_INFO_BATT_TEMP_LSB(chip), buf, 2);
-	if (rc < 0) {
-		pr_err("failed to read addr=0x%04x, rc=%d\n",
-			BATT_INFO_BATT_TEMP_LSB(chip), rc);
+	chip->vadc_dev = qpnp_get_vadc(chip->dev, "vadc_therm");
+
+	if (IS_ERR(chip->vadc_dev)) {
+		rc = PTR_ERR(chip->vadc_dev);
+		if (rc != -EPROBE_DEFER)
+			pr_err("VADC property: vadc_therm missing\n");
 		return rc;
 	}
-		pr_err("addr=0x%04x,buf1=%04x buf0=%04x\n",
-			BATT_INFO_BATT_TEMP_LSB(chip), buf[1], buf[0]);
-	temp = ((buf[1] & BATT_TEMP_MSB_MASK) << 8) |
-		(buf[0] & BATT_TEMP_LSB_MASK);
-	temp = DIV_ROUND_CLOSEST(temp, 4);
 
-	/* Value is in Kelvin; Convert it to deciDegC */
-	temp = (temp - 273) * 10;
-		pr_err("LCT TEMP=%d\n", temp);
+	rc = qpnp_vadc_read(chip->vadc_dev, VADC_AMUX_THM3_PU2, &result);
+	if (!rc) {
+		temp = result.physical;
+		/* Value is in DegreeC; Convert it to deciDegC.
+		   Also, add an offset of -20 deciDegC, to report
+		   a more probable battery temperature. */
+		temp = (temp * 10) - 20;
+		*val = temp;
+		return rc;
+	} else {
+		pr_err("Unable to read battery_temp\n");
+		return rc;
+	}
 
 #if defined(CONFIG_KERNEL_CUSTOM_E7T)
 	if (temp < -40){
