@@ -116,3 +116,10 @@ all.config
 
 # fetched Android config fragments
 android/configs/android-*.cfg
+
+# my shit lol
+k.sh
+out/
+aarch64-linux-android-4.9/
+arm-linux-androideabi-4.9/
+clang-llvm/
