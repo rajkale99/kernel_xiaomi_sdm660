@@ -123,3 +123,6 @@ out/
 aarch64-linux-android-4.9/
 arm-linux-androideabi-4.9/
 clang-llvm/
+AnyKernel2/
+error.log
+scripts/ufdt/
