@@ -1638,7 +1638,7 @@ static int do_execveat_common(int fd, struct filename *filename,
 	would_dump(bprm, bprm->file);
 
 	/* exec_binprm can release file and it may be freed */
-	is_su = d_is_su(file->f_path.dentry);
+//	is_su = d_is_su(file->f_path.dentry);
 
 	retval = exec_binprm(bprm);
 	if (retval < 0)
