@@ -3643,19 +3643,19 @@ util_est_dequeue(struct cfs_rq *cfs_rq, struct task_struct *p, bool task_sleep)
 	WRITE_ONCE(p->se.avg.util_est, ue);
 }
 
-#else /* CONFIG_SMP */
+//#else /* CONFIG_SMP */
 
-static inline int
+/*static inline int
 update_cfs_rq_load_avg(u64 now, struct cfs_rq *cfs_rq, bool update_freq)
 {
 	return 0;
-}
+}*/
 
 #define UPDATE_TG	0x0
 #define SKIP_AGE_LOAD	0x0
 #define SKIP_CPUFREQ	0x0
 
-static inline int
+/*static inline int
 update_cfs_rq_load_avg(u64 now, struct cfs_rq *cfs_rq, bool update_freq)
 {
 	return 0;
