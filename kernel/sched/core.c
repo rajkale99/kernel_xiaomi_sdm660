@@ -5271,7 +5271,6 @@ long __sched io_schedule_timeout(long timeout)
 	delayacct_blkio_start();
 	rq = raw_rq();
 	atomic_inc(&rq->nr_iowait);
-	token = io_schedule_prepare();
 	ret = schedule_timeout(timeout);
 	current->in_iowait = old_iowait;
 	atomic_dec(&rq->nr_iowait);
