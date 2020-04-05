@@ -988,14 +988,6 @@ static int adreno_probe(struct platform_device *pdev)
 	if (adreno_support_64bit(adreno_dev))
 		device->mmu.features |= KGSL_MMU_64BIT;
 
-	/* Default to 4K alignment (in other words, no additional padding) */
-	device->mmu.va_padding = PAGE_SIZE;
-
-	if (adreno_dev->gpucore->va_padding) {
-		device->mmu.features |= KGSL_MMU_PAD_VA;
-		device->mmu.va_padding = adreno_dev->gpucore->va_padding;
-	}
-
 	status = kgsl_device_platform_probe(device);
 	if (status) {
 		device->pdev = NULL;
@@ -1316,53 +1308,6 @@ static void _set_secvid(struct kgsl_device *device)
 	}
 }
 
-static int adreno_switch_to_unsecure_mode(struct adreno_device *adreno_dev,
-				struct adreno_ringbuffer *rb)
-{
-	unsigned int *cmds;
-	int ret;
-
-	cmds = adreno_ringbuffer_allocspace(rb, 2);
-	if (IS_ERR(cmds))
-		return PTR_ERR(cmds);
-	if (cmds == NULL)
-		return -ENOSPC;
-
-	cmds += cp_secure_mode(adreno_dev, cmds, 0);
-
-	ret = adreno_ringbuffer_submit_spin(rb, NULL, 2000);
-	if (ret)
-		adreno_spin_idle_debug(adreno_dev,
-				"Switch to unsecure failed to idle\n");
-
-	return ret;
-}
-
-int adreno_set_unsecured_mode(struct adreno_device *adreno_dev,
-		struct adreno_ringbuffer *rb)
-{
-	int ret = 0;
-
-	if (!adreno_is_a5xx(adreno_dev))
-		return -EINVAL;
-
-	if (ADRENO_QUIRK(adreno_dev, ADRENO_QUIRK_CRITICAL_PACKETS) &&
-			adreno_is_a5xx(adreno_dev)) {
-		ret = a5xx_critical_packet_submit(adreno_dev, rb);
-		if (ret)
-			return ret;
-	}
-
-	/* GPU comes up in secured mode, make it unsecured by default */
-	if (adreno_dev->zap_loaded)
-		ret = adreno_switch_to_unsecure_mode(adreno_dev, rb);
-	else
-		adreno_writereg(adreno_dev,
-				ADRENO_REG_RBBM_SECVID_TRUST_CONTROL, 0x0);
-
-	return ret;
-}
-
 /**
  * _adreno_start - Power up the GPU and prepare to accept commands
  * @adreno_dev: Pointer to an adreno_device structure
@@ -1411,13 +1356,13 @@ static int _adreno_start(struct adreno_device *adreno_dev)
 	if (status)
 		goto error_pwr_off;
 
+	_set_secvid(device);
+
 	status = adreno_ocmem_malloc(adreno_dev);
 	if (status) {
 		KGSL_DRV_ERR(device, "OCMEM malloc failed\n");
 		goto error_mmu_off;
 	}
-
-	_set_secvid(device);
 
 	/* Enable 64 bit gpu addr if feature is set */
 	if (gpudev->enable_64bit &&
@@ -2319,34 +2264,6 @@ bool adreno_isidle(struct kgsl_device *device)
 	return adreno_hw_isidle(adreno_dev);
 }
 
-/* Print some key registers if a spin-for-idle times out */
-void adreno_spin_idle_debug(struct adreno_device *adreno_dev,
-		const char *str)
-{
-	struct kgsl_device *device = &adreno_dev->dev;
-	unsigned int rptr, wptr;
-	unsigned int status, status3, intstatus;
-	unsigned int hwfault;
-
-	dev_err(device->dev, str);
-
-	adreno_readreg(adreno_dev, ADRENO_REG_CP_RB_RPTR, &rptr);
-	adreno_readreg(adreno_dev, ADRENO_REG_CP_RB_WPTR, &wptr);
-
-	adreno_readreg(adreno_dev, ADRENO_REG_RBBM_STATUS, &status);
-	adreno_readreg(adreno_dev, ADRENO_REG_RBBM_STATUS3, &status3);
-	adreno_readreg(adreno_dev, ADRENO_REG_RBBM_INT_0_STATUS, &intstatus);
-	adreno_readreg(adreno_dev, ADRENO_REG_CP_HW_FAULT, &hwfault);
-
-	dev_err(device->dev,
-		"rb=%d pos=%X/%X rbbm_status=%8.8X/%8.8X int_0_status=%8.8X\n",
-		adreno_dev->cur_rb->id, rptr, wptr, status, status3, intstatus);
-
-	dev_err(device->dev, " hwfault=%8.8X\n", hwfault);
-
-	kgsl_device_snapshot(device, NULL);
-}
-
 /**
  * adreno_spin_idle() - Spin wait for the GPU to idle
  * @adreno_dev: Pointer to an adreno device
@@ -2663,47 +2580,6 @@ static int adreno_readtimestamp(struct kgsl_device *device,
 	return status;
 }
 
-/**
- * adreno_device_private_create(): Allocate an adreno_device_private structure
- */
-struct kgsl_device_private *adreno_device_private_create(void)
-{
-	struct adreno_device_private *adreno_priv =
-			kzalloc(sizeof(*adreno_priv), GFP_KERNEL);
-
-	if (adreno_priv) {
-		INIT_LIST_HEAD(&adreno_priv->perfcounter_list);
-		return &adreno_priv->dev_priv;
-	}
-	return NULL;
-}
-
-/**
- * adreno_device_private_destroy(): Destroy an adreno_device_private structure
- * and release the perfcounters held by the kgsl fd.
- * @dev_priv: The kgsl device private structure
- */
-void adreno_device_private_destroy(struct kgsl_device_private *dev_priv)
-{
-	struct kgsl_device *device = dev_priv->device;
-	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
-	struct adreno_device_private *adreno_priv =
-		container_of(dev_priv, struct adreno_device_private,
-		dev_priv);
-	struct adreno_perfcounter_list_node *p, *tmp;
-
-	mutex_lock(&device->mutex);
-	list_for_each_entry_safe(p, tmp, &adreno_priv->perfcounter_list, node) {
-		adreno_perfcounter_put(adreno_dev, p->groupid,
-					p->countable, PERFCOUNTER_FLAG_NONE);
-		list_del(&p->node);
-		kfree(p);
-	}
-	mutex_unlock(&device->mutex);
-
-	kfree(adreno_priv);
-}
-
 static inline s64 adreno_ticks_to_us(u32 ticks, u32 freq)
 {
 	freq /= 1000000;
@@ -2969,8 +2845,6 @@ static const struct kgsl_functable adreno_functable = {
 	.snapshot = adreno_snapshot,
 	.irq_handler = adreno_irq_handler,
 	.drain = adreno_drain,
-	.device_private_create = adreno_device_private_create,
-	.device_private_destroy = adreno_device_private_destroy,
 	/* Optional functions */
 	.drawctxt_create = adreno_drawctxt_create,
 	.drawctxt_detach = adreno_drawctxt_detach,
